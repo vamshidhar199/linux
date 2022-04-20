@@ -69,7 +69,11 @@
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
-
+//extern atomic64_t total_exits;
+//extern atomic64_t cycles_spent_in_exit;
+extern atomic64_t i_exit_counter[69];
+extern atomic64_t exit_counters;
+extern atomic64_t exit_duration;
 #ifdef MODULE
 static const struct x86_cpu_id vmx_cpu_id[] = {
 	X86_MATCH_FEATURE(X86_FEATURE_VMX, NULL),
@@ -173,6 +177,9 @@ static u32 vmx_possible_passthrough_msrs[MAX_POSSIBLE_PASSTHROUGH_MSRS] = {
 	MSR_CORE_C6_RESIDENCY,
 	MSR_CORE_C7_RESIDENCY,
 };
+
+//assignment 2 
+//u64 cycles_spent_in_exit;
 
 /*
  * These 2 parameters are used to config the controls for Pause-Loop Exiting:
@@ -6016,7 +6023,10 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	union vmx_exit_reason exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
 	u16 exit_handler_index;
-
+	extern atomic_long_t total_cpu_cycles_per_reason[69];
+	u64 start_time=rdtsc();
+	//atomic64_inc(&total_exits);
+	atomic64_inc(&exit_counters);
 	/*
 	 * Flush logged GPAs PML buffer, this will make dirty_bitmap more
 	 * updated. Another good is, in kvm_vm_ioctl_get_dirty_log, before
@@ -6025,6 +6035,13 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	 * flushed already.  Note, PML is never enabled in hardware while
 	 * running L2.
 	 */
+	 
+	 if(exit_reason.basic <69){
+	 atomic64_inc(&i_exit_counter[exit_reason.basic]);
+	 atomic64_add((rdtsc()-start_time), &total_cpu_cycles_per_reason[exit_reason.basic]);
+	 }
+	 
+	 
 	if (enable_pml && !is_guest_mode(vcpu))
 		vmx_flush_pml_buffer(vcpu);
 
@@ -6074,20 +6091,27 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 			return 1;
 		}
 
-		if (nested_vmx_reflect_vmexit(vcpu))
+		if (nested_vmx_reflect_vmexit(vcpu)){
+		//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+		atomic64_add(rdtsc() - start_time, &exit_duration);	
 			return 1;
+			}
 	}
 
 	/* If guest state is invalid, start emulating.  L2 is handled above. */
 	if (vmx->emulation_required)
+	{	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+		atomic64_add(rdtsc() - start_time, &exit_duration);	
 		return handle_invalid_guest_state(vcpu);
-
+	}
 	if (exit_reason.failed_vmentry) {
 		dump_vmcs(vcpu);
 		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
 		vcpu->run->fail_entry.hardware_entry_failure_reason
 			= exit_reason.full;
 		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+		//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+		atomic64_add(rdtsc() - start_time, &exit_duration);	
 		return 0;
 	}
 
@@ -6097,6 +6121,8 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		vcpu->run->fail_entry.hardware_entry_failure_reason
 			= vmcs_read32(VM_INSTRUCTION_ERROR);
 		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+		//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+		atomic64_add(rdtsc() - start_time, &exit_duration);	
 		return 0;
 	}
 
@@ -6126,6 +6152,8 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		}
 		vcpu->run->internal.data[ndata++] = vcpu->arch.last_vmentry_cpu;
 		vcpu->run->internal.ndata = ndata;
+		//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+		atomic64_add(rdtsc() - start_time, &exit_duration);	
 		return 0;
 	}
 
@@ -6148,24 +6176,39 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 		}
 	}
 
-	if (exit_fastpath != EXIT_FASTPATH_NONE)
+	if (exit_fastpath != EXIT_FASTPATH_NONE){
+		//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+		atomic64_add(rdtsc() - start_time, &exit_duration);	
 		return 1;
+		}
 
 	if (exit_reason.basic >= kvm_vmx_max_exit_handlers)
 		goto unexpected_vmexit;
 #ifdef CONFIG_RETPOLINE
-	if (exit_reason.basic == EXIT_REASON_MSR_WRITE)
-		return kvm_emulate_wrmsr(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_PREEMPTION_TIMER)
-		return handle_preemption_timer(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_INTERRUPT_WINDOW)
-		return handle_interrupt_window(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_EXTERNAL_INTERRUPT)
-		return handle_external_interrupt(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_HLT)
-		return kvm_emulate_halt(vcpu);
-	else if (exit_reason.basic == EXIT_REASON_EPT_MISCONFIG)
-		return handle_ept_misconfig(vcpu);
+	if (exit_reason.basic == EXIT_REASON_MSR_WRITE){
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
+		return kvm_emulate_wrmsr(vcpu);}
+	else if (exit_reason.basic == EXIT_REASON_PREEMPTION_TIMER){
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
+		return handle_preemption_timer(vcpu);}
+	else if (exit_reason.basic == EXIT_REASON_INTERRUPT_WINDOW){
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
+		return handle_interrupt_window(vcpu);}
+	else if (exit_reason.basic == EXIT_REASON_EXTERNAL_INTERRUPT){
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
+		return handle_external_interrupt(vcpu);}
+	else if (exit_reason.basic == EXIT_REASON_HLT){
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
+		return kvm_emulate_halt(vcpu);}
+	else if (exit_reason.basic == EXIT_REASON_EPT_MISCONFIG){
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
+		return handle_ept_misconfig(vcpu);}
 #endif
 
 	exit_handler_index = array_index_nospec((u16)exit_reason.basic,
@@ -6173,6 +6216,8 @@ static int __vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	if (!kvm_vmx_exit_handlers[exit_handler_index])
 		goto unexpected_vmexit;
 
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
 	return kvm_vmx_exit_handlers[exit_handler_index](vcpu);
 
 unexpected_vmexit:
@@ -6185,6 +6230,8 @@ unexpected_vmexit:
 	vcpu->run->internal.ndata = 2;
 	vcpu->run->internal.data[0] = exit_reason.full;
 	vcpu->run->internal.data[1] = vcpu->arch.last_vmentry_cpu;
+	//atomic64_add(rdtsc() - start_time, &cycles_spent_in_exit);
+	atomic64_add(rdtsc() - start_time, &exit_duration);	
 	return 0;
 }
 
@@ -8206,3 +8253,4 @@ static int __init vmx_init(void)
 	return 0;
 }
 module_init(vmx_init);
+
