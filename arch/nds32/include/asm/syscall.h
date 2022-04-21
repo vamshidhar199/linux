@@ -1,21 +1,12 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Access to user system call parameters and results
- *
- * Copyright (C) 2008-2009 Red Hat, Inc.  All rights reserved.
- *
- * This file is a stub providing documentation for what functions
- * asm-ARCH/syscall.h files need to define.  Most arch definitions
- * will be simple inlines.
- *
- * All of these functions expect to be called with no locks,
- * and only when the caller is sure that the task of interest
- * cannot return to user mode while we are looking at it.
- */
+/* SPDX-License-Identifier: GPL-2.0 */
+// Copyright (C) 2008-2009 Red Hat, Inc.  All rights reserved.
+// Copyright (C) 2005-2017 Andes Technology Corporation
 
-#ifndef _ASM_SYSCALL_H
-#define _ASM_SYSCALL_H	1
+#ifndef _ASM_NDS32_SYSCALL_H
+#define _ASM_NDS32_SYSCALL_H	1
 
+#include <uapi/linux/audit.h>
+#include <linux/err.h>
 struct task_struct;
 struct pt_regs;
 
@@ -35,7 +26,11 @@ struct pt_regs;
  *
  * It's only valid to call this when @task is known to be blocked.
  */
-int syscall_get_nr(struct task_struct *task, struct pt_regs *regs);
+static inline int
+syscall_get_nr(struct task_struct *task, struct pt_regs *regs)
+{
+	return regs->syscallno;
+}
 
 /**
  * syscall_rollback - roll back registers after an aborted system call
@@ -43,9 +38,9 @@ int syscall_get_nr(struct task_struct *task, struct pt_regs *regs);
  * @regs:	task_pt_regs() of @task
  *
  * It's only valid to call this when @task is stopped for system
- * call exit tracing (due to %SYSCALL_WORK_SYSCALL_TRACE or
- * %SYSCALL_WORK_SYSCALL_AUDIT), after ptrace_report_syscall_entry()
- * returned nonzero to prevent the system call from taking place.
+ * call exit tracing (due to TIF_SYSCALL_TRACE or TIF_SYSCALL_AUDIT),
+ * after ptrace_report_syscall_entry() returned nonzero to prevent
+ * the system call from taking place.
  *
  * This rolls back the register state in @regs so it's as if the
  * system call instruction was a no-op.  The registers containing
@@ -53,7 +48,11 @@ int syscall_get_nr(struct task_struct *task, struct pt_regs *regs);
  * system call instruction.  This may not be the same as what the
  * register state looked like at system call entry tracing.
  */
-void syscall_rollback(struct task_struct *task, struct pt_regs *regs);
+static inline void
+syscall_rollback(struct task_struct *task, struct pt_regs *regs)
+{
+	regs->uregs[0] = regs->orig_r0;
+}
 
 /**
  * syscall_get_error - check result of traced system call
@@ -63,10 +62,14 @@ void syscall_rollback(struct task_struct *task, struct pt_regs *regs);
  * Returns 0 if the system call succeeded, or -ERRORCODE if it failed.
  *
  * It's only valid to call this when @task is stopped for tracing on exit
- * from a system call, due to %SYSCALL_WORK_SYSCALL_TRACE or
- * %SYSCALL_WORK_SYSCALL_AUDIT.
+ * from a system call, due to %TIF_SYSCALL_TRACE or %TIF_SYSCALL_AUDIT.
  */
-long syscall_get_error(struct task_struct *task, struct pt_regs *regs);
+static inline long
+syscall_get_error(struct task_struct *task, struct pt_regs *regs)
+{
+	unsigned long error = regs->uregs[0];
+	return IS_ERR_VALUE(error) ? error : 0;
+}
 
 /**
  * syscall_get_return_value - get the return value of a traced system call
@@ -77,10 +80,13 @@ long syscall_get_error(struct task_struct *task, struct pt_regs *regs);
  * This value is meaningless if syscall_get_error() returned nonzero.
  *
  * It's only valid to call this when @task is stopped for tracing on exit
- * from a system call, due to %SYSCALL_WORK_SYSCALL_TRACE or
- * %SYSCALL_WORK_SYSCALL_AUDIT.
+ * from a system call, due to %TIF_SYSCALL_TRACE or %TIF_SYSCALL_AUDIT.
  */
-long syscall_get_return_value(struct task_struct *task, struct pt_regs *regs);
+static inline long
+syscall_get_return_value(struct task_struct *task, struct pt_regs *regs)
+{
+	return regs->uregs[0];
+}
 
 /**
  * syscall_set_return_value - change the return value of a traced system call
@@ -95,11 +101,14 @@ long syscall_get_return_value(struct task_struct *task, struct pt_regs *regs);
  * code; the user sees a failed system call with this errno code.
  *
  * It's only valid to call this when @task is stopped for tracing on exit
- * from a system call, due to %SYSCALL_WORK_SYSCALL_TRACE or
- * %SYSCALL_WORK_SYSCALL_AUDIT.
+ * from a system call, due to %TIF_SYSCALL_TRACE or %TIF_SYSCALL_AUDIT.
  */
-void syscall_set_return_value(struct task_struct *task, struct pt_regs *regs,
-			      int error, long val);
+static inline void
+syscall_set_return_value(struct task_struct *task, struct pt_regs *regs,
+			 int error, long val)
+{
+	regs->uregs[0] = (long)error ? error : val;
+}
 
 /**
  * syscall_get_arguments - extract system call parameter values
@@ -107,28 +116,27 @@ void syscall_set_return_value(struct task_struct *task, struct pt_regs *regs,
  * @regs:	task_pt_regs() of @task
  * @args:	array filled with argument values
  *
- * Fetches 6 arguments to the system call.  First argument is stored in
-*  @args[0], and so on.
+ * Fetches 6 arguments to the system call (from 0 through 5). The first
+ * argument is stored in @args[0], and so on.
  *
  * It's only valid to call this when @task is stopped for tracing on
- * entry to a system call, due to %SYSCALL_WORK_SYSCALL_TRACE or
- * %SYSCALL_WORK_SYSCALL_AUDIT.
+ * entry to a system call, due to %TIF_SYSCALL_TRACE or %TIF_SYSCALL_AUDIT.
  */
-void syscall_get_arguments(struct task_struct *task, struct pt_regs *regs,
-			   unsigned long *args);
+#define SYSCALL_MAX_ARGS 6
+static inline void
+syscall_get_arguments(struct task_struct *task, struct pt_regs *regs,
+		      unsigned long *args)
+{
+	args[0] = regs->orig_r0;
+	args++;
+	memcpy(args, &regs->uregs[0] + 1, 5 * sizeof(args[0]));
+}
 
-/**
- * syscall_get_arch - return the AUDIT_ARCH for the current system call
- * @task:	task of interest, must be blocked
- *
- * Returns the AUDIT_ARCH_* based on the system call convention in use.
- *
- * It's only valid to call this when @task is stopped on entry to a system
- * call, due to %SYSCALL_WORK_SYSCALL_TRACE, %SYSCALL_WORK_SYSCALL_AUDIT, or
- * %SYSCALL_WORK_SECCOMP.
- *
- * Architectures which permit CONFIG_HAVE_ARCH_SECCOMP_FILTER must
- * provide an implementation of this.
- */
-int syscall_get_arch(struct task_struct *task);
-#endif	/* _ASM_SYSCALL_H */
+static inline int
+syscall_get_arch(struct task_struct *task)
+{
+	return IS_ENABLED(CONFIG_CPU_BIG_ENDIAN)
+		? AUDIT_ARCH_NDS32BE : AUDIT_ARCH_NDS32;
+}
+
+#endif /* _ASM_NDS32_SYSCALL_H */
